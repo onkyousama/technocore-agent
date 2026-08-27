@@ -7,9 +7,10 @@ When the daily run detects a manual change it:
 
 Auth, in order of preference:
   * `gh` CLI already authenticated  -> plain `git push` (gh's credential helper)
-  * a fine-grained PAT in <project>/.env as GITHUB_TOKEN  -> pushed via
-    GIT_ASKPASS, so the token is only ever in the child process environment —
-    never in argv, never on disk in the public tree, never logged.
+  * a fine-grained PAT in <project>/.env as GITHUB_TOKEN  -> supplied to git
+    through an inline credential helper that reads it from the child process
+    environment. The token is never in argv, never written to disk in the
+    public tree or git config, and is masked out of any log line.
 
 The token and the private key never leave this machine except as the HTTPS
 Authorization git sends to github.com to push.
@@ -20,14 +21,17 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 from . import config
 from .logutil import log
 
-_ASKPASS_CMD = config.STATE_DIR / "git_askpass.cmd"
+# Inline git credential helper: reads the token from $GH_PAT in the child
+# environment and answers "get" with it. The token is never in argv, never in
+# a file, never in git config on disk. Requires `sh` (Git for Windows bundles it).
+_CRED_HELPER = ('!f() { test "$1" = get && '
+                'printf "username=x-access-token\\npassword=%s\\n" "$GH_PAT"; }; f')
 
 
 # --- token / gh -------------------------------------------------------
@@ -63,38 +67,29 @@ class PublishError(RuntimeError):
     pass
 
 
-def _git(*args: str, token: str | None = None, check: bool = True) -> str:
+def _git(*args: str, token: str | None = None, keep_helper: bool = False,
+         check: bool = True) -> str:
     env = os.environ.copy()
-    env["GIT_TERMINAL_PROMPT"] = "0"
+    env["GIT_TERMINAL_PROMPT"] = "0"       # never block on a terminal prompt
+    cfg = []
+    if not keep_helper:
+        # Clear any configured credential helper (Git for Windows ships
+        # credential.helper=manager at system level, whose GUI popup would
+        # hang a non-interactive run).
+        cfg += ["-c", "credential.helper=", "-c", "credential.interactive=never"]
     if token:
-        _write_askpass()
-        env["GIT_ASKPASS"] = str(_ASKPASS_CMD)
-        env["GH_PAT"] = token          # consumed by the askpass helper only
-    r = subprocess.run(["git", "-C", str(config.PUBLISH_DIR), *args],
-                       capture_output=True, text=True, env=env, timeout=120)
+        cfg += ["-c", f"credential.helper={_CRED_HELPER}"]
+        env["GH_PAT"] = token             # read only by the inline helper's sh
+    r = subprocess.run(["git", *cfg, "-C", str(config.PUBLISH_DIR), *args],
+                       capture_output=True, text=True, env=env, timeout=90)
     if check and r.returncode != 0:
         raise PublishError(f"git {' '.join(args)} -> {r.returncode}: "
                            f"{_mask(r.stderr.strip() or r.stdout.strip())}")
     return r.stdout.strip()
 
 
-def _write_askpass() -> None:
-    # contains NO secret — it echoes an env var git will have set for it
-    if not _ASKPASS_CMD.exists():
-        config.STATE_DIR.mkdir(parents=True, exist_ok=True)
-        _ASKPASS_CMD.write_text("@echo %GH_PAT%\r\n", encoding="ascii")
-
-
 def _mask(s: str) -> str:
-    return re.sub(r"(github_pat_|ghp_|gho_)[A-Za-z0-9_]+", r"\1***", s)
-
-
-def _remote_slug() -> str:
-    url = _git("remote", "get-url", "origin")
-    m = re.search(r"github\.com[/:]([^/]+/[^/.]+)", url)
-    if not m:
-        raise PublishError(f"cannot parse owner/repo from remote: {url}")
-    return m.group(1)
+    return re.sub(r"(github_pat_|ghp_|gho_|ghs_)[A-Za-z0-9_]+", r"\1***", s)
 
 
 def is_repo() -> bool:
@@ -114,13 +109,11 @@ def _has_unpushed() -> bool:
 
 
 def _push(token: str | None) -> None:
-    slug = _remote_slug()
     if token:
-        # username in the URL, password (the token) via GIT_ASKPASS
-        url = f"https://x-access-token@github.com/{slug}.git"
-        _git("push", url, f"HEAD:{config.PUBLISH_BRANCH}", token=token)
+        _git("push", "origin", f"HEAD:{config.PUBLISH_BRANCH}", token=token)
     else:
-        _git("push", "origin", f"HEAD:{config.PUBLISH_BRANCH}")
+        # gh CLI path: let its configured credential helper answer
+        _git("push", "origin", f"HEAD:{config.PUBLISH_BRANCH}", keep_helper=True)
 
 
 # --- append untranslated change --------------------------------------
