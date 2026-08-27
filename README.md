@@ -145,6 +145,41 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1 -Uninstall
 
 ---
 
+## Auto-reflecting upstream manual changes
+
+When the daily run detects that one of the four manuals changed, `publish.py`:
+
+1. appends the changed **English original** to the end of the matching
+   `docs-ja/<name>.ja.md` as a `## 未訳の変更（原文・<date>）` section (a
+   ```` ```diff ```` block), so the translation gap is visible and tracked;
+2. commits `docs-ja/` and pushes to GitHub.
+
+Auth, tried in this order:
+- `gh` CLI already authenticated → plain `git push`;
+- else a **fine-grained PAT** in `<project>/.env` as `GITHUB_TOKEN`
+  (repo: this repo only, permission **Contents: Read and write**). The token is
+  read into the child process environment and handed to git via `GIT_ASKPASS` —
+  never in a command line, never written into the public tree, never logged.
+
+`.env` lives next to the project root and is git-ignored. If a push fails
+(offline, bad token), the commit stays local and the next run retries it
+(`push_pending()`).
+
+Where to look when publishing misbehaves:
+
+| symptom | check |
+|---|---|
+| `publish: {'ok': False, ... 'no GitHub auth'}` | `.env` missing / wrong key name / token not `GITHUB_TOKEN=` |
+| `publish: {... 'error': 'git push ... 403'}` | token lacks **Contents: write**, expired, or wrong repo |
+| `publish: {... 'not a git repo'}` | `public/` has no `.git` — re-run the one-time git setup |
+| nothing about `publish:` in the log | `docs=unchanged` that day — nothing to publish |
+| commit exists locally but not on GitHub | `git -C public log origin/main..HEAD`; fixed automatically next run, or `python -c "from roomwatch import publish; print(publish.push_pending())"` |
+
+Full run log: `~/.technocore/logs/daily.log`. Task wrapper output:
+`~/.technocore/logs/task_stdout.log`.
+
+---
+
 ## Key backup
 
 Back up **either** of these (each fully reconstructs the identity; both is
