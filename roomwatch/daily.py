@@ -20,7 +20,8 @@ import sys
 import time
 import traceback
 
-from . import client, config, docswatch, identity, measure, ownership, state
+from . import (client, config, docswatch, identity, measure, ownership,
+               publish, state)
 from .client import HttpError, single_line
 from .keys import Identity, load as load_identity
 from .logutil import log, rotate_all
@@ -145,6 +146,16 @@ def run(force_observation: bool = False) -> int:
             log(f"posted to /r/{target}: {line}")
         except Exception as e:
             log(f"could not post docs-change line: {e}")
+
+    # reflect the upstream change into the public repo (append + push)
+    try:
+        if docs["changed"]:
+            pub = publish.publish_docs(docs["changed"])
+        else:
+            pub = publish.push_pending()      # self-heal any earlier failure
+        log(f"publish: {pub}")
+    except Exception as e:
+        log(f"publish step failed (non-fatal): {e}")
 
     # --- measure --------------------------------------------
     record, obs_line = measure.build(docs["status"])

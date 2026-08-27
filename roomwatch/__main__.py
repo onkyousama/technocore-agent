@@ -44,8 +44,9 @@ def _info() -> int:
     print(f"  log file          : {config.MAIN_LOG}")
     print()
     print("PROJECT")
-    print(f"  japanese manuals  : {config.DOCS_JA_DIR}")
+    print(f"  japanese manuals  : {config.PUBLISH_DOCS_JA}")
     print(f"  diffs             : {config.DIFFS_DIR}")
+    print(f"  publish tree      : {config.PUBLISH_DIR}")
     return 0
 
 

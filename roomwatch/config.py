@@ -17,6 +17,11 @@ KEY_RAW = DATA_DIR / "ed25519_private.raw"          # 32 raw bytes (backup form)
 DID_FILE = DATA_DIR / "did.txt"                     # public — the did:key string
 PUB_FILE = DATA_DIR / "ed25519_public.txt"          # public — hex + multibase
 
+# Optional: extra space-separated tokens appended after the did:key in the DID
+# note (e.g. "repo:https://github.com/you/your-repo"). One line, public. The
+# daily run preserves whatever is here.
+DID_NOTE_EXTRA_FILE = DATA_DIR / "did_note_extra.txt"
+
 STATE_DIR = DATA_DIR / "state"
 LOG_DIR = DATA_DIR / "logs"
 DOCS_SNAPSHOT_DIR = STATE_DIR / "docs"              # yesterday's copy of each manual
@@ -30,9 +35,28 @@ DOC_HASHES_FILE = DOCS_SNAPSHOT_DIR / "hashes.json"
 MAIN_LOG = LOG_DIR / "daily.log"
 
 # Translated manuals and diffs live in the project so they are easy to read.
-DOCS_JA_DIR = PROJECT_ROOT / "docs-ja"
 DIFFS_DIR = PROJECT_ROOT / "diffs"
 DOCS_SRC_DIR = PROJECT_ROOT / "docs-src"
+
+# --- publishing (requirement: auto-reflect manual changes to GitHub) ------
+
+# The public git working tree that mirrors the GitHub repo. The daily job
+# appends untranslated upstream changes to its docs-ja/ and pushes.
+PUBLISH_DIR = Path(os.environ.get("ROOMWATCH_PUBLISH_DIR", PROJECT_ROOT / "public"))
+PUBLISH_DOCS_JA = PUBLISH_DIR / "docs-ja"
+PUBLISH_BRANCH = os.environ.get("ROOMWATCH_PUBLISH_BRANCH", "main")
+
+# The GitHub token lives OUTSIDE the public tree and is never committed or
+# logged. Fine-grained PAT, single repo, Contents: Read and write.
+ENV_FILE = Path(os.environ.get("ROOMWATCH_ENV_FILE", PROJECT_ROOT / ".env"))
+
+# manual name (as in DOCS) -> the docs-ja file that translates it
+DOCS_JA_FILES = {
+    "skill.md": "skill.ja.md",
+    "llms.txt": "llms.ja.md",
+    "auth.md": "auth.ja.md",
+    "patterns.md": "patterns.ja.md",
+}
 
 # --- service --------------------------------------------------------------
 

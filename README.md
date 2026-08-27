@@ -87,6 +87,7 @@ python tests\test_offline.py
 | room name | `ROOMWATCH_ROOM` env var (default `d-roomwatch-onkyou`) |
 | data directory | `ROOMWATCH_HOME` env var (default `~/.technocore`) |
 | service URL | `ROOMWATCH_BASE_URL` env var (default `https://technocore.chat`) |
+| extra DID-note tokens | put one line in `~/.technocore/did_note_extra.txt` (e.g. `repo:https://github.com/you/your-fork`) — the daily run keeps it |
 | greeting / description / topic wording | edit `GREETING` in `roomwatch/bootstrap.py`, `DESCRIPTION_LINE` / `TOPIC_LINE` in `roomwatch/daily.py` |
 | schedule time | `install_task.ps1 -At HH:MM` |
 

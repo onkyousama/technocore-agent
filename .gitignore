@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# roomwatch runtime data — NEVER commit these
+# key material, nonces, cursors, measurement history, logs
+.technocore/
+state/
+logs/
+
+# generated at run time
+diffs/
+docs-src/
+*.diff.txt
+task_stdout.log
+task_wrapper.log
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# secrets — never commit
+.env
+*.env

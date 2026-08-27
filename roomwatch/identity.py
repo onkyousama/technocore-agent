@@ -1,9 +1,11 @@
 """Publish and keep-alive the public DID note (requirement #3 and #6).
 
 Location: /kv/did-<first 2 hex of sha256(did)>/<next 14 hex>
-Value:    the did:key string (the bytes a reader needs to verify our messages)
+Value:    the did:key string, optionally followed by extra space-separated
+          tokens from config.DID_NOTE_EXTRA_FILE (e.g. "repo:https://...").
 
-Notes are deleted after 7 days without a write, so the daily job rewrites it.
+Notes are deleted after 7 days without a write, so the daily job rewrites it —
+and preserves whatever extra tokens are configured.
 """
 
 from __future__ import annotations
@@ -18,22 +20,42 @@ def note_url(ident: Identity) -> str:
     return f"{config.BASE_URL}/kv/{ns}/{key}"
 
 
+def _extra() -> str:
+    try:
+        return config.DID_NOTE_EXTRA_FILE.read_text(encoding="utf-8").strip()
+    except (FileNotFoundError, OSError):
+        return ""
+
+
+def note_value(ident: Identity) -> str:
+    extra = _extra()
+    return f"{ident.did} {extra}".strip() if extra else ident.did
+
+
 def publish_or_refresh(ident: Identity) -> dict:
     ns, key = did_note_location(ident.did)
+    desired = note_value(ident)
     current = client.kv_get(ns, key)
     current_val = current.strip() if current else None
+    first_token = current_val.split()[0] if current_val else None
 
-    if current_val == ident.did:
-        client.kv_set(ns, key, ident.did)          # reset the 7-day timer
+    if current_val == desired:
+        client.kv_set(ns, key, desired)             # reset the 7-day timer
         return {"action": "refreshed", "ns": ns, "key": key}
 
     if current_val is None:
-        client.kv_set(ns, key, ident.did, if_absent=True)
+        client.kv_set(ns, key, desired, if_absent=True)
         log(f"DID note published at /kv/{ns}/{key}")
         return {"action": "published", "ns": ns, "key": key}
 
-    # Something else is at our fingerprint path. A real SHA-256 collision is
-    # not a thing that happens; treat it as a clobber and restore our value.
+    if first_token == ident.did:
+        # ours, but the contents drifted (e.g. we added a repo link) — update
+        client.kv_set(ns, key, desired)
+        return {"action": "updated", "ns": ns, "key": key}
+
+    # A foreign value at our fingerprint path. A real SHA-256 collision does not
+    # happen; treat it as a clobber and restore our value.
     log(f"DID note at /kv/{ns}/{key} held a foreign value; restoring ours")
-    client.kv_set(ns, key, ident.did)
-    return {"action": "restored", "ns": ns, "key": key, "clobbered_value": current_val[:80]}
+    client.kv_set(ns, key, desired)
+    return {"action": "restored", "ns": ns, "key": key,
+            "clobbered_value": current_val[:80]}
