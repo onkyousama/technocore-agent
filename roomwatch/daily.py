@@ -52,26 +52,50 @@ def _post_signed(ident: Identity, room: str, text: str) -> dict:
 
 # --- one-time-ish sub-steps ------------------------------------------
 
+def _room_exists(room: str) -> bool | None:
+    """True if the server currently holds this room, False if it was reaped or
+    never created, None if the check itself failed (caller must not assume)."""
+    try:
+        j = client.read_room_json(room, limit=1)
+        return bool(j.get("count") or j.get("last_seq"))
+    except HttpError as e:
+        if e.status == 404:
+            return False
+        return None
+    except Exception:
+        return None
+
+
 def ensure_room(ident: Identity, target_ok: bool) -> dict:
-    """Create d-roomwatch-onkyou with a description line if we have never
-    initialised it. Returns {'room': <where to post>, ...}."""
+    """Make sure d-roomwatch-onkyou exists as a >=2-message room, recreating it
+    if it was reaped while the PC was off (7-day idle / 24h single-message).
+    Returns {'room': <where to post>, ...}."""
     run = state.load_last_run()
-    if run.get("room_initialized"):
-        return {"room": config.ROOM, "created_now": False}
     if not target_ok:
         return {"room": config.FALLBACK_ROOM, "created_now": False,
                 "reason": "not owner"}
 
-    # First initialisation: post the description line. The observation line
-    # posted later in this same run is the mandatory 2nd message (#6).
+    exists = _room_exists(config.ROOM)
+    if run.get("room_initialized") and exists is not False:
+        # exists, or the check failed (exists is None) — do not risk a duplicate
+        # description post; the observation post later keeps the room alive
+        return {"room": config.ROOM, "created_now": False}
+
+    reaped = bool(run.get("room_initialized")) and exists is False
+    what = "recreating reaped" if reaped else "creating"
+
+    # Post the description line. The observation line posted later in this same
+    # run is the mandatory 2nd message so the room is not a 24h single-message
+    # room (#6).
     try:
         nonce = state.next_nonce(config.ROOM)
         client.say_signed(ident, config.ROOM, nonce, DESCRIPTION_LINE)
         run["room_initialized"] = True
         run["room_created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        run.pop("room_pending", None)
         state.save_last_run(run)
-        log(f"created {config.ROOM} and posted the description line")
-        return {"room": config.ROOM, "created_now": True}
+        log(f"{what} {config.ROOM}: posted the description line")
+        return {"room": config.ROOM, "created_now": True, "reaped": reaped}
     except HttpError as e:
         if e.status == 400:
             log(f"room creation refused (400 — service at room/storage cap). "

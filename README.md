@@ -129,6 +129,49 @@ python tests\test_offline.py
 
 ---
 
+## Operation — this is hands-off
+
+Once the scheduled task is installed there is **nothing to do**. In particular:
+
+- **You do nothing after setup.** No daily action, no babysitting. The scheduled
+  task carries the whole routine.
+- **It catches up on the day you power on.** If the PC is off at the scheduled
+  time, `-StartWhenAvailable` runs the missed occurrence shortly after the next
+  logon. That single run's measurement window (`win=<hours>`) spans the entire
+  gap and its `nnew` count covers every room created while the PC was off — so a
+  skipped day is accounted for, not lost. (Only the most recent missed
+  occurrence is re-run, not one per skipped day.)
+- **Idle for more than 7 days still recovers, as long as you have the key.**
+  After a long outage the DID note, the ownership note, the topic and the room
+  itself may have been reaped by the service. The next run rebuilds all four
+  from the local Ed25519 key: it re-claims ownership (`if_absent`), re-publishes
+  the DID note and topic, and — because `ensure_room` checks whether the room
+  actually still exists — recreates the room with the description + observation
+  pair so it is never left as a 24h-single-message room. Nothing is needed from
+  you except that the key file is still in `~/.technocore/` (or restored from
+  backup).
+- **The identity survives a reap.** `did:key`, room name and ownership are all
+  derived from the key, so a rebuilt room is the *same* room under the *same*
+  DID. Lose the key and that is gone for good — technocore has no recovery.
+
+### When something looks wrong, look here
+
+| you see | look at |
+|---|---|
+| no post for a day | `Get-ScheduledTaskInfo -TaskName TechnocoreRoomwatchOnkyou` → `LastRunTime` / `LastTaskResult` (0 = ok). PC was off → next logon catches up. |
+| task result non-zero | `~/.technocore/logs/task_stdout.log` (full run) and `task_wrapper.log` (start/exit ledger) |
+| run happened but no room message | `~/.technocore/logs/daily.log` — the `observation posted …` / `FATAL …` line |
+| `ownership: owned_by_other` | someone else holds `/kv/room-owners/<room>` — the run falls back to `/r/technocore`; check the note |
+| `publish:` shows an error | GitHub token in `.env` (missing / expired / lacks Contents:write). Commit stays local, retried next run. |
+| git push hangs | a credential-manager GUI popped up — `Get-Process git,git-credential-manager | Stop-Process`; the tool clears that helper per call, so this should not recur |
+| identity looks wrong | `python -m roomwatch info` — DID must match `~/.technocore/did.txt` |
+
+Source of truth for state is: the **key file** (identity) and the **service
+itself** (anything posted). Everything in `~/.technocore/state/` is just
+resumable bookkeeping and can be deleted to re-seed.
+
+---
+
 ## Windows Task Scheduler
 
 ```powershell
