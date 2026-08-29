@@ -182,9 +182,27 @@ powershell -ExecutionPolicy Bypass -File scripts\install_task.ps1 -Uninstall
 - Task name: `TechnocoreRoomwatchOnkyou`
 - `-StartWhenAvailable` is enabled ("run task as soon as possible after a
   scheduled start is missed").
+- **Restart on failure: every 30 min, up to 3 times.** If a run exits non-zero
+  (service unreachable, etc.) Task Scheduler retries it the same day.
 - Runs only while the user is logged on — no stored password.
+- `ExecutionTimeLimit` is 1 hour.
 - Record files (`logs/daily.log`, `state/measure_history.jsonl`) are trimmed to
   the newest ~half once they pass 1 MiB.
+
+### Network resilience
+
+- `client._request` retries transient failures — read timeouts, connection
+  resets, truncated responses, `429`, `500/502/503/504` — 3 times with
+  exponential backoff + jitter (`429` honours `Retry-After`). Per-attempt
+  timeout is 30 s.
+- If it still fails, a clean `HttpError` propagates; `daily.main()` logs it and
+  exits non-zero **without** marking the day done, so nothing is half-applied:
+  - notes (DID / ownership / topic) are idempotent — a re-run just rewrites them;
+  - the observation line is only recorded after it is *confirmed present in the
+    room* (a timed-out POST that actually landed is detected and not re-sent);
+  - a changed manual's stored snapshot is advanced only after both the room
+    line and the GitHub append succeed — otherwise the change is re-detected and
+    re-handled next run (the append is idempotent, keyed by a content hash).
 
 ---
 

@@ -82,7 +82,8 @@ DOCS = {
 
 # --- limits / behaviour --------------------------------------------------
 
-HTTP_TIMEOUT = 20                  # seconds, per request
+HTTP_TIMEOUT = 30                  # seconds per attempt (/rooms can be slow);
+                                  #   client._request retries transient failures
 LONG_POLL_TIMEOUT = 15            # seconds, for wait= requests
 MAX_LOG_BYTES = 1_048_576         # 1 MiB — trim record files past this (#9)
 EVENTS_PAGE = 200                 # max /r/events lines the server will serve

@@ -109,13 +109,17 @@ def check() -> dict:
         )
         _write_text_lf(diff_path, header + difftext)
 
-        _write_text_lf(snap, current)
-        hashes[name] = cur_hash
+        # NOTE: the snapshot and hash are NOT advanced here. commit_changes()
+        # does that, and only for the docs whose downstream actions (room post
+        # + GitHub append) succeeded — so a crash mid-run re-detects rather than
+        # silently swallowing the change.
         changed.append({
             "name": name, "added": added, "removed": removed,
-            "diff_path": str(diff_path),
+            "sha": cur_hash, "diff_path": str(diff_path),
+            "diff_text": difftext, "current": current,
         })
 
+    # seeds only — changed docs are persisted later by commit_changes()
     _save_hashes(hashes)
 
     if changed:
@@ -134,3 +138,15 @@ def check() -> dict:
             for c in changed
         ],
     }
+
+
+def commit_changes(changed: list[dict]) -> None:
+    """Advance the stored snapshot + hash for docs that were fully handled.
+    Anything not passed here stays 'changed' and is re-detected next run."""
+    if not changed:
+        return
+    hashes = _load_hashes()
+    for c in changed:
+        _write_text_lf(_snapshot_path(c["name"]), c["current"])
+        hashes[c["name"]] = c["sha"]
+    _save_hashes(hashes)

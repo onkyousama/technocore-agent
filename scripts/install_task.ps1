@@ -61,9 +61,12 @@ $settings = New-ScheduledTaskSettingsSet `
     -AllowStartIfOnBatteries `
     -DontStopIfGoingOnBatteries `
     -MultipleInstances IgnoreNew `
+    -RestartInterval (New-TimeSpan -Minutes 30) `
+    -RestartCount 3 `
     -ExecutionTimeLimit (New-TimeSpan -Hours 1)
 
-# StartWhenAvailable only catches up missed runs within this window:
+# catch up a missed run at the next opportunity, and if a run exits non-zero
+# (network still down, etc.) retry it every 30 min, up to 3 times that day.
 $settings.StartWhenAvailable = $true
 
 Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `

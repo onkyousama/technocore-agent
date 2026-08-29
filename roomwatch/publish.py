@@ -119,83 +119,84 @@ def _push(token: str | None) -> None:
 # --- append untranslated change --------------------------------------
 
 def append_untranslated_change(name: str, service_path: str, added: int,
-                               removed: int, diff_text: str,
-                               date: str) -> Path | None:
+                               removed: int, diff_text: str, sha: str,
+                               date: str) -> tuple[Path | None, bool]:
+    """Return (file, appended). `appended` is False if this exact change was
+    already appended (idempotent — safe to call again after a crash)."""
     ja_name = config.DOCS_JA_FILES.get(name)
     if not ja_name:
-        return None
+        return None, False
     target = config.PUBLISH_DOCS_JA / ja_name
     if not target.exists():
         log(f"publish: {target} missing, cannot append change for {name}")
-        return None
+        return None, False
 
+    marker = f"<!-- roomwatch-change {name} {sha[:12]} -->"
+    if marker in target.read_text(encoding="utf-8"):
+        return target, False
+
+    body = "\n".join(ln for ln in diff_text.splitlines()
+                     if not ln.startswith("# ")).strip()
     section = (
-        f"\n\n---\n\n"
+        f"\n\n---\n\n{marker}\n"
         f"## 未訳の変更（原文・{date}）\n\n"
         f"> 原文 <{config.BASE_URL}{service_path}> がこの日に変更されました"
         f"（+{added} / -{removed} 行）。**以下は英語原文の差分で、まだ日本語訳に"
         f"反映されていません。** 訳を更新したらこのセクションを削除してください。\n\n"
-        f"```diff\n{diff_text.rstrip()}\n```\n"
+        f"```diff\n{body}\n```\n"
     )
     with target.open("a", encoding="utf-8", newline="\n") as fh:
         fh.write(section)
-    return target
+    return target, True
 
 
 # --- top-level entry points ----------------------------------------
 
 def publish_docs(changed: list[dict]) -> dict:
-    """`changed` is docswatch.check()['changed']. Append each, commit, push."""
+    """`changed` is docswatch.check()['changed']. Idempotently append each to
+    its docs-ja file, commit, and push (also flushing any earlier unpushed
+    commit)."""
     if not is_repo():
         return {"ok": False, "reason": f"{config.PUBLISH_DIR} is not a git repo "
                 f"— run the one-time setup first"}
 
     date = time.strftime("%Y-%m-%d", time.gmtime())
-    touched = []
+    touched, appended_names = [], []
     for c in changed:
-        name = c["name"]
-        service_path = config.DOCS.get(name, "")
-        diff_text = ""
-        try:
-            diff_text = Path(c["diff_path"]).read_text(encoding="utf-8")
-            # drop our own header comment lines, keep the real diff
-            diff_text = "\n".join(
-                ln for ln in diff_text.splitlines()
-                if not ln.startswith("# ")
-            ).strip()
-        except (OSError, KeyError):
-            pass
-        p = append_untranslated_change(name, service_path, c["added"],
-                                       c["removed"], diff_text, date)
-        if p:
+        p, appended = append_untranslated_change(
+            c["name"], config.DOCS.get(c["name"], ""), c["added"], c["removed"],
+            c.get("diff_text", ""), c.get("sha", ""), date)
+        if p and p not in touched:
             touched.append(p)
-
-    if not touched:
-        return {"ok": False, "reason": "no docs-ja files matched"}
+        if appended:
+            appended_names.append(c["name"])
 
     gh_ok = gh_authenticated()
     token = None if gh_ok else read_env_token()
     auth = "gh" if gh_ok else ("pat" if token else "none")
 
-    _git("add", "--", *[str(p.relative_to(config.PUBLISH_DIR)) for p in touched])
+    if touched:
+        _git("add", "--", *[str(p.relative_to(config.PUBLISH_DIR)) for p in touched])
     staged = _git("diff", "--cached", "--name-only")
-    if not staged:
-        return {"ok": True, "committed": False, "reason": "nothing staged"}
+    if staged:
+        names = ", ".join(appended_names or [c["name"] for c in changed])
+        _git("commit", "-m",
+             f"docs-ja: append untranslated upstream change ({names}, {date})")
 
-    names = ", ".join(c["name"] for c in changed)
-    _git("commit", "-m",
-         f"docs-ja: append untranslated upstream change ({names}, {date})")
-
+    if not _has_unpushed():
+        return {"ok": True, "committed": bool(staged), "pushed": False,
+                "reason": "nothing new to push"}
     if auth == "none":
-        return {"ok": False, "committed": True, "pushed": False,
+        return {"ok": False, "committed": bool(staged), "pushed": False,
                 "reason": "no GitHub auth — set GITHUB_TOKEN in .env; "
                           "commit is local and will push next run"}
     try:
         _push(token)
-        return {"ok": True, "committed": True, "pushed": True, "auth": auth,
-                "files": [p.name for p in touched]}
+        return {"ok": True, "committed": bool(staged), "pushed": True,
+                "auth": auth, "files": [p.name for p in touched]}
     except PublishError as e:
-        return {"ok": False, "committed": True, "pushed": False, "error": str(e)}
+        return {"ok": False, "committed": bool(staged), "pushed": False,
+                "error": str(e)}
 
 
 def push_pending() -> dict:

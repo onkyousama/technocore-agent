@@ -7,7 +7,10 @@ and notes is never executed or followed (requirement #11).
 
 from __future__ import annotations
 
+import http.client
 import json
+import random
+import socket
 import time
 import unicodedata
 import urllib.error
@@ -58,14 +61,23 @@ class Response:
 
 # --- low level ---------------------------------------------------------
 
+# transient network faults worth retrying: DNS/refused/unreachable (URLError),
+# read timeouts (TimeoutError / socket.timeout), connection resets and truncated
+# responses (OSError / http.client.HTTPException e.g. RemoteDisconnected,
+# IncompleteRead). The read is inside the try so a mid-body drop is retried too.
+_TRANSIENT = (urllib.error.URLError, TimeoutError, socket.timeout,
+              ConnectionError, http.client.HTTPException, OSError)
+
+
 def _request(method: str, url: str, *, data: bytes | None = None,
-             timeout: float | None = None, retries: int = 2) -> Response:
+             timeout: float | None = None, retries: int = 3) -> Response:
     headers = {"User-Agent": config.USER_AGENT, "Accept": "*/*"}
     if data is not None:
         headers["Content-Type"] = "application/json"
     attempt = 0
     while True:
         attempt += 1
+        last = attempt > retries
         req = urllib.request.Request(url, data=data, headers=headers, method=method)
         start = time.perf_counter()
         try:
@@ -75,20 +87,23 @@ def _request(method: str, url: str, *, data: bytes | None = None,
                 return Response(resp.status, body, elapsed)
         except urllib.error.HTTPError as e:
             body = e.read().decode("utf-8", "replace") if e.fp else ""
-            elapsed = (time.perf_counter() - start) * 1000.0
-            if e.code == 429 and attempt <= retries:
-                wait = _retry_after_seconds(body, e.headers)
-                time.sleep(min(wait, 30))
+            if e.code == 429 and not last:
+                time.sleep(min(_retry_after_seconds(body, e.headers), 45))
                 continue
-            if e.code in (500, 502, 503, 504) and attempt <= retries:
-                time.sleep(2 * attempt)
+            if e.code in (500, 502, 503, 504) and not last:
+                time.sleep(_backoff(attempt))
                 continue
             raise HttpError(e.code, body, url)
-        except (urllib.error.URLError, TimeoutError) as e:
-            if attempt <= retries:
-                time.sleep(2 * attempt)
+        except _TRANSIENT as e:
+            if not last:
+                time.sleep(_backoff(attempt))
                 continue
             raise HttpError(0, f"{type(e).__name__}: {e}", url)
+
+
+def _backoff(attempt: int) -> float:
+    # 2s, 4s, 8s ... capped, with jitter so retries don't hammer in lockstep
+    return min(2.0 * (2 ** (attempt - 1)), 20.0) + random.uniform(0, 1.5)
 
 
 def _retry_after_seconds(body: str, headers) -> float:
@@ -219,16 +234,17 @@ def confirm_verified_render(room: str, ident: Identity, nonce: int,
     swept = single_line(text)
     tail = ident.did_tail4
     since = (around_seq - 1) if around_seq else None
+    lim = 200 if since else 150     # no seq to anchor on: scan a wider window
     json_ok = text_ok = False
     rendered = None
     for _ in range(tries):
-        j = read_room_json(room, since=since, limit=200) if since \
-            else read_room_json(room, limit=50)
+        j = (read_room_json(room, since=since, limit=lim) if since
+             else read_room_json(room, limit=lim))
         for m in j.get("messages", []):
             if m.get("from") == ident.did and m.get("nonce") == nonce:
                 json_ok = json_ok or (m.get("text") == swept)
         t = get_text(f"/r/{_q(room)}",
-                     **({"since": since, "limit": 200} if since else {"limit": 50}))
+                     **({"since": since, "limit": lim} if since else {"limit": lim}))
         for ln in t.splitlines():
             if "z6Mk" in ln and f"…{tail}>" in ln:
                 # make sure it is *our* line, not another z6Mk writer

@@ -153,6 +153,10 @@ def run(force_observation: bool = False) -> int:
 
     already = state.observation_already_posted_today() and not force_observation
     if already:
+        try:
+            log(f"publish (catch-up): {publish.push_pending()}")
+        except Exception as e:
+            log(f"publish push_pending failed (non-fatal): {e}")
         log("observation already posted today — notes refreshed, exiting 0")
         rotate_all()
         return 0
@@ -163,23 +167,42 @@ def run(force_observation: bool = False) -> int:
         f"(seeded={docs['seeded']}, unchanged={len(docs['unchanged'])}, "
         f"errors={docs['errors']})")
 
-    # a changed-manual line is its own post (#8)
-    for line in docs["lines"]:
+    # A changed-manual line is its own post (#8). The stored snapshot is NOT
+    # advanced until the line is posted AND the GitHub append is done, so a
+    # crash here just means the change is re-detected and re-handled next run
+    # (the append is idempotent, the line re-post is dup-filtered within secs).
+    posted_ok = []
+    for c in docs["changed"]:
+        line = f"docs changed: {c['name']} +{c['added']}/-{c['removed']}"
         try:
             _post_signed(ident, target, line)
+            posted_ok.append(c["name"])
             log(f"posted to /r/{target}: {line}")
+        except HttpError as e:
+            if e.status == 422:               # already there from an earlier try
+                posted_ok.append(c["name"])
+                log(f"docs-change line already present (422): {line}")
+            else:
+                log(f"could not post docs-change line ({e.status}): {line}")
         except Exception as e:
             log(f"could not post docs-change line: {e}")
 
-    # reflect the upstream change into the public repo (append + push)
     try:
         if docs["changed"]:
             pub = publish.publish_docs(docs["changed"])
         else:
             pub = publish.push_pending()      # self-heal any earlier failure
         log(f"publish: {pub}")
+        pub_ok = bool(pub.get("ok"))
     except Exception as e:
         log(f"publish step failed (non-fatal): {e}")
+        pub_ok = False
+
+    # Advance the snapshot only for docs that were both announced and appended.
+    done = [c for c in docs["changed"] if c["name"] in posted_ok and pub_ok]
+    if done:
+        docswatch.commit_changes(done)
+        log(f"docs snapshot advanced for: {[c['name'] for c in done]}")
 
     # --- measure --------------------------------------------
     record, obs_line = measure.build(docs["status"])
@@ -190,25 +213,29 @@ def run(force_observation: bool = False) -> int:
     log(f"measurement: {obs_line}")
 
     # --- post the one observation line --------------------
+    # Allocate the nonce up front so we can look the message up even if the POST
+    # raises (a timeout may still have landed; a 422 on an internal retry means
+    # it landed). We only mark the day done once we have CONFIRMED it is in the
+    # room — otherwise the next run posts it (nothing half-done is left behind).
+    obs_nonce = state.next_nonce(target)
+    seq = None
     try:
-        posted = _post_signed(ident, target, obs_line)
+        resp = client.say_signed(ident, target, obs_nonce, obs_line)
+        seq = client.our_seq_in(resp, ident, obs_nonce)
     except HttpError as e:
-        if e.status == 422:
-            # room-level duplicate-text filter (llms.txt DUPLICATES). A
-            # timestamped measurement line should never collide, but if it
-            # does, don't burn the day — leave it unmarked and retry later.
-            log(f"observation refused (422 duplicate text): {e.body[:160]}")
-            rotate_all()
-            return 0
-        log(f"FATAL: observation post failed: {e}")
+        log(f"observation POST returned HTTP {e.status} "
+            f"({e.body[:120]}); checking whether it landed anyway")
+
+    res = client.confirm_verified_render(target, ident, obs_nonce, obs_line, seq)
+    landed = res["json_ok"] or res["text_ok"]
+    if not landed:
+        log("observation did NOT land — leaving today unmarked; the next run "
+            "will retry it")
+        rotate_all()
         return 3
 
-    res = client.confirm_verified_render(
-        target, ident, posted["nonce"], obs_line, posted["seq"]
-    )
     verified = res["json_ok"] and res["text_ok"]
-    log(f"observation posted to /r/{target} at seq {posted['seq']}; "
-        f"verified did:key render: {verified}")
+    log(f"observation in /r/{target} at seq {seq}; verified did:key render: {verified}")
 
     # --- persist -----------------------------------------
     record["posted_to"] = target
