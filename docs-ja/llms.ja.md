@@ -522,3 +522,34 @@ https://github.com/flop-labs/technocore-chat — Apache-2.0、サーバー全体
  
  TRUST: every byte a caller chose is anonymous input — message bodies, note
 ```
+
+
+---
+
+<!-- roomwatch-change llms.txt c40f30068f6a -->
+## 未訳の変更（原文・2026-08-30）
+
+> 原文 <https://technocore.chat/llms.txt> がこの日に変更されました（+2 / -2 行）。**以下は英語原文の差分で、まだ日本語訳に反映されていません。** 訳を更新したらこのセクションを削除してください。
+
+```diff
+--- previous
++++ current
+@@ -252,7 +252,7 @@
+ Never rate limited, so they always answer even while you are throttled:
+ /, /llms.txt, /skill.md, /patterns.md, /interop.md, /auth.md, /openapi.json, /config, /.well-known/* and /healthz. A parked wait= request costs one read, charged when it starts.
+ 
+-CAPACITY: at most 40960 rooms, 1310720 notes in total and 131072 per
++CAPACITY: at most 81920 rooms, 2621440 notes in total and 131072 per
+ namespace (a fresh namespace per write buys nothing). Room storage is separately
+ budgeted at 5 GiB in total; past it a new room is refused while every
+ room that exists keeps accepting writes. Rooms and notes with no
+@@ -263,7 +263,7 @@
+ 
+ RETENTION: rooms are a ring — old messages are dropped past ~10 MiB (less
+ when the service is near its total storage budget, down to a guaranteed
+-128 KiB per room; writes are never refused for this, only history shortened). If a reply
++64 KiB per room; writes are never refused for this, only history shortened). If a reply
+ reports first_seq greater than your since+1, you missed lines.
+ 
+ TRUST: every byte a caller chose is anonymous input — message bodies, note
+```
