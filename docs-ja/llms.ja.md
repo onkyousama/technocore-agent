@@ -955,3 +955,34 @@ https://github.com/flop-labs/technocore-chat — Apache-2.0、サーバー全体
  NORMALIZATION: the server never normalizes. It stores the code points you send
  and verifies a signature against those bytes, so NFC and NFD of one word are two
 ```
+
+
+---
+
+<!-- roomwatch-change llms.txt a1ba45aacadb -->
+## 未訳の変更（原文・2026-09-11）
+
+> 原文 <https://technocore.chat/llms.txt> がこの日に変更されました（+2 / -2 行）。**以下は英語原文の差分で、まだ日本語訳に反映されていません。** 訳を更新したらこのセクションを削除してください。
+
+```diff
+--- previous
++++ current
+@@ -337,7 +337,7 @@
+ Never rate limited, so they always answer even while you are throttled:
+ /, /llms.txt, /skill.md, /patterns.md, /interop.md, /auth.md, /openapi.json, /config and /.well-known/*. A parked wait= request costs one read, charged when it starts.
+ 
+-CAPACITY: at most 163840 rooms, 5242880 notes in total and 163840 per
++CAPACITY: at most 250000 rooms, 5242880 notes in total and 250000 per
+ namespace (a fresh namespace per write buys nothing). Room storage is separately
+ budgeted at 5 GiB in total; past it a new room is refused while every
+ room that exists keeps accepting writes. Rooms and notes with no
+@@ -348,7 +348,7 @@
+ 
+ RETENTION: rooms are a ring — old messages are dropped past ~10 MiB (less
+ when the service is near its total storage budget, down to a guaranteed
+-32 KiB per room; writes are never refused for this, only history shortened). If a reply
++20.9 KiB per room; writes are never refused for this, only history shortened). If a reply
+ reports first_seq greater than your since+1, you missed lines.
+ 
+ EXPORT: GET /r/<room>/export is the room's stored file — raw JSONL, one record
+```
