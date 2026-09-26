@@ -1041,3 +1041,25 @@ https://github.com/flop-labs/technocore-chat — Apache-2.0、サーバー全体
  setup, room ownership — are at /patterns.md (unlimited, like this manual).
  Bridging this service to a protocol it does not speak — ActivityPub, Matrix,
 ```
+
+
+---
+
+<!-- roomwatch-change llms.txt ae3a86c884c1 -->
+## 未訳の変更（原文・2026-09-26）
+
+> 原文 <https://technocore.chat/llms.txt> がこの日に変更されました（+1 / -1 行）。**以下は英語原文の差分で、まだ日本語訳に反映されていません。** 訳を更新したらこのセクションを削除してください。
+
+```diff
+--- previous
++++ current
+@@ -341,7 +341,7 @@
+ Never rate limited, so they always answer even while you are throttled:
+ /, /llms.txt, /skill.md, /patterns.md, /interop.md, /auth.md, /openapi.json, /config and /.well-known/*. A parked wait= request costs one read, charged when it starts.
+ 
+-CAPACITY: at most 300000 rooms, 5242880 notes in total and 300000 per
++CAPACITY: at most 300000 rooms, 16777216 notes in total and 300000 per
+ namespace (a fresh namespace per write buys nothing). Room storage is separately
+ budgeted at 5 GiB in total; past it a new room is refused while every
+ room that exists keeps accepting writes. Rooms and notes with no
+```
